@@ -15,33 +15,123 @@ export class TaskManagementStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    // Google OAuth の Client ID / Secret は SSM Parameter Store や
+    // Secrets Manager から取得する想定。デプロイ前に設定必須。
+    const googleClientId = new cdk.CfnParameter(this, 'GoogleClientId', {
+      type: 'String',
+      description: 'Google OAuth 2.0 Client ID',
+      noEcho: false,
+    });
+    const googleClientSecret = new cdk.CfnParameter(this, 'GoogleClientSecret', {
+      type: 'String',
+      description: 'Google OAuth 2.0 Client Secret',
+      noEcho: true,
+    });
+
+    // 許可するメールドメイン (カンマ区切り)
+    // 現在は gmail.com のみ、会社ドメインへの変更は ALLOWED_DOMAINS を更新するだけ
+    const allowedDomains = new cdk.CfnParameter(this, 'AllowedDomains', {
+      type: 'String',
+      default: 'gmail.com',
+      description: '許可するメールドメイン (カンマ区切り例: gmail.com または example.com)',
+    });
+
+    // ── Pre-authentication Lambda (ドメイン制限) ──────────────────────
+    const domainCheckFn = new lambda.Function(this, 'DomainCheckFn', {
+      functionName: 'task-management-domain-check',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'domain-check.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/triggers')),
+      environment: {
+        // デプロイ後に変更する場合は Lambda 環境変数を更新するだけでよい
+        ALLOWED_DOMAINS: allowedDomains.valueAsString,
+      },
+      timeout: cdk.Duration.seconds(5),
+    });
+
     // ── Cognito User Pool ──────────────────────────────────────────────
     const userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: 'task-management-users',
-      selfSignUpEnabled: false,
+      selfSignUpEnabled: true,        // Googleログイン経由の自動サインアップを許可
       signInAliases: { email: true },
       autoVerify: { email: true },
-      passwordPolicy: {
-        minLength: 8,
-        requireLowercase: true,
-        requireUppercase: true,
-        requireDigits: true,
-        requireSymbols: false,
+      standardAttributes: {
+        email: { required: true, mutable: true },
+        fullname: { required: false, mutable: true },
+        profilePicture: { required: false, mutable: true },
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // Googleログイン後のドメインチェック
+      lambdaTriggers: {
+        preAuthentication: domainCheckFn,
+        // 新規ユーザー作成時にもドメインチェック
+        preSignUp: domainCheckFn,
+      },
     });
 
+    // Cognito が Lambda を呼び出せるよう許可
+    userPool.addTrigger(cognito.UserPoolOperation.PRE_SIGN_UP, domainCheckFn);
+
+    // ── Cognito Hosted UI ドメイン ─────────────────────────────────────
+    // Cognito のマネージドログインページを使う (Google OAuth コールバック先)
+    const userPoolDomain = userPool.addDomain('UserPoolDomain', {
+      cognitoDomain: {
+        // アカウント ID を含めてユニークにする
+        domainPrefix: `taskflow-${this.account}`,
+      },
+    });
+
+    // ── Google Identity Provider ───────────────────────────────────────
+    const googleIdp = new cognito.UserPoolIdentityProviderGoogle(this, 'GoogleIdp', {
+      userPool,
+      clientId: googleClientId.valueAsString,
+      clientSecretValue: cdk.SecretValue.unsafePlainText(googleClientSecret.valueAsString),
+      // Cognito が Google から取得するスコープ
+      scopes: ['openid', 'email', 'profile'],
+      // Google の属性を Cognito の標準属性にマッピング
+      attributeMapping: {
+        email: cognito.ProviderAttribute.GOOGLE_EMAIL,
+        fullname: cognito.ProviderAttribute.GOOGLE_NAME,
+        profilePicture: cognito.ProviderAttribute.GOOGLE_PICTURE,
+      },
+    });
+
+    // ── User Pool Client (Hosted UI 用) ───────────────────────────────
+    // CloudFront URL は CDK 合成時に未確定なので、デプロイ後に手動でコールバック URL を追加するか
+    // 固定のカスタムドメインを使う。ここでは localhost と CloudFront のプレースホルダーを設定。
     const userPoolClient = new cognito.UserPoolClient(this, 'UserPoolClient', {
       userPool,
-      authFlows: {
-        userPassword: true,
-        userSrp: true,
-      },
+      userPoolClientName: 'task-management-web',
       generateSecret: false,
+      // Hosted UI (OAuth) を有効化
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+        },
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.PROFILE,
+        ],
+        // デプロイ後に CloudFront URL に合わせて更新
+        callbackUrls: [
+          'http://localhost:5173/callback',
+          // CDK デプロイ後に 'https://<CloudFront>.cloudfront.net/callback' を追加してください
+        ],
+        logoutUrls: [
+          'http://localhost:5173',
+        ],
+      },
+      supportedIdentityProviders: [
+        cognito.UserPoolClientIdentityProvider.GOOGLE,
+      ],
     });
 
-    // チーム用グループ (例: frontend, backend, infrastructure, qa)
+    // Google IdP が先に作られないとクライアントが失敗するため依存関係を明示
+    userPoolClient.node.addDependency(googleIdp);
+
+    // チーム用グループ (frontend, backend, infrastructure, qa)
     const teams = ['frontend', 'backend', 'infrastructure', 'qa'];
     teams.forEach(team => {
       new cognito.CfnUserPoolGroup(this, `Group-${team}`, {
@@ -50,8 +140,6 @@ export class TaskManagementStack extends cdk.Stack {
         description: `${team} チーム`,
       });
     });
-
-    // 管理者グループ
     new cognito.CfnUserPoolGroup(this, 'Group-admin', {
       userPoolId: userPool.userPoolId,
       groupName: 'admin',
@@ -59,7 +147,6 @@ export class TaskManagementStack extends cdk.Stack {
     });
 
     // ── DynamoDB Tables ────────────────────────────────────────────────
-    // Tasks テーブル: PK=teamId, SK=taskId
     const tasksTable = new dynamodb.Table(this, 'TasksTable', {
       tableName: 'tasks',
       partitionKey: { name: 'teamId', type: dynamodb.AttributeType.STRING },
@@ -68,8 +155,6 @@ export class TaskManagementStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecovery: true,
     });
-
-    // assignee でも検索できるように GSI を追加
     tasksTable.addGlobalSecondaryIndex({
       indexName: 'assignee-index',
       partitionKey: { name: 'assigneeId', type: dynamodb.AttributeType.STRING },
@@ -77,15 +162,6 @@ export class TaskManagementStack extends cdk.Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
-    // status でフィルタするための GSI
-    tasksTable.addGlobalSecondaryIndex({
-      indexName: 'status-index',
-      partitionKey: { name: 'teamId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'status', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // Comments テーブル: PK=taskId, SK=commentId
     const commentsTable = new dynamodb.Table(this, 'CommentsTable', {
       tableName: 'task-comments',
       partitionKey: { name: 'taskId', type: dynamodb.AttributeType.STRING },
@@ -94,7 +170,7 @@ export class TaskManagementStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // ── Lambda Layer (共通コード) ─────────────────────────────────────
+    // ── Lambda Layer ──────────────────────────────────────────────────
     const lambdaLayer = new lambda.LayerVersion(this, 'CommonLayer', {
       code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/layer')),
       compatibleRuntimes: [lambda.Runtime.NODEJS_20_X],
@@ -109,47 +185,33 @@ export class TaskManagementStack extends cdk.Stack {
       USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
     };
 
-    const lambdaProps: Partial<lambda.FunctionProps> = {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      layers: [lambdaLayer],
-      environment: commonEnv,
-      timeout: cdk.Duration.seconds(30),
-    };
+    const makeFn = (id: string, handler: string, name: string) =>
+      new lambda.Function(this, id, {
+        functionName: name,
+        runtime: lambda.Runtime.NODEJS_20_X,
+        handler,
+        code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/handlers')),
+        layers: [lambdaLayer],
+        environment: commonEnv,
+        timeout: cdk.Duration.seconds(30),
+      });
 
-    const tasksHandler = new lambda.Function(this, 'TasksHandler', {
-      ...lambdaProps,
-      functionName: 'task-management-tasks',
-      handler: 'tasks.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/handlers')),
-    } as lambda.FunctionProps);
+    const tasksHandler = makeFn('TasksHandler', 'tasks.handler', 'task-management-tasks');
+    const commentsHandler = makeFn('CommentsHandler', 'comments.handler', 'task-management-comments');
+    const usersHandler = makeFn('UsersHandler', 'users.handler', 'task-management-users');
 
-    const commentsHandler = new lambda.Function(this, 'CommentsHandler', {
-      ...lambdaProps,
-      functionName: 'task-management-comments',
-      handler: 'comments.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/handlers')),
-    } as lambda.FunctionProps);
-
-    const usersHandler = new lambda.Function(this, 'UsersHandler', {
-      ...lambdaProps,
-      functionName: 'task-management-users',
-      handler: 'users.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/handlers')),
-    } as lambda.FunctionProps);
-
-    // DynamoDB 権限付与
     tasksTable.grantReadWriteData(tasksHandler);
     tasksTable.grantReadData(commentsHandler);
     commentsTable.grantReadWriteData(commentsHandler);
     tasksTable.grantReadData(usersHandler);
 
-    // Cognito 操作権限 (ユーザー一覧取得など)
     const cognitoPolicy = new iam.PolicyStatement({
       actions: [
         'cognito-idp:ListUsers',
         'cognito-idp:ListUsersInGroup',
         'cognito-idp:ListGroups',
         'cognito-idp:AdminGetUser',
+        'cognito-idp:AdminAddUserToGroup',
       ],
       resources: [userPool.userPoolArn],
     });
@@ -163,52 +225,41 @@ export class TaskManagementStack extends cdk.Stack {
 
     const api = new apigateway.RestApi(this, 'TaskManagementApi', {
       restApiName: 'task-management-api',
-      description: '技術部タスク管理 API',
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
       },
-      deployOptions: {
-        stageName: 'prod',
-        loggingLevel: apigateway.MethodLoggingLevel.INFO,
-      },
+      deployOptions: { stageName: 'prod', loggingLevel: apigateway.MethodLoggingLevel.INFO },
     });
 
-    const authOptions: apigateway.MethodOptions = {
+    const auth: apigateway.MethodOptions = {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     };
 
-    // /tasks
     const tasksResource = api.root.addResource('tasks');
-    tasksResource.addMethod('GET', new apigateway.LambdaIntegration(tasksHandler), authOptions);
-    tasksResource.addMethod('POST', new apigateway.LambdaIntegration(tasksHandler), authOptions);
+    tasksResource.addMethod('GET', new apigateway.LambdaIntegration(tasksHandler), auth);
+    tasksResource.addMethod('POST', new apigateway.LambdaIntegration(tasksHandler), auth);
 
     const taskResource = tasksResource.addResource('{taskId}');
-    taskResource.addMethod('GET', new apigateway.LambdaIntegration(tasksHandler), authOptions);
-    taskResource.addMethod('PUT', new apigateway.LambdaIntegration(tasksHandler), authOptions);
-    taskResource.addMethod('DELETE', new apigateway.LambdaIntegration(tasksHandler), authOptions);
+    taskResource.addMethod('GET', new apigateway.LambdaIntegration(tasksHandler), auth);
+    taskResource.addMethod('PUT', new apigateway.LambdaIntegration(tasksHandler), auth);
+    taskResource.addMethod('DELETE', new apigateway.LambdaIntegration(tasksHandler), auth);
 
-    // /tasks/{taskId}/comments
     const taskCommentsResource = taskResource.addResource('comments');
-    taskCommentsResource.addMethod('GET', new apigateway.LambdaIntegration(commentsHandler), authOptions);
-    taskCommentsResource.addMethod('POST', new apigateway.LambdaIntegration(commentsHandler), authOptions);
+    taskCommentsResource.addMethod('GET', new apigateway.LambdaIntegration(commentsHandler), auth);
+    taskCommentsResource.addMethod('POST', new apigateway.LambdaIntegration(commentsHandler), auth);
+    taskCommentsResource.addResource('{commentId}').addMethod('DELETE', new apigateway.LambdaIntegration(commentsHandler), auth);
 
-    const commentResource = taskCommentsResource.addResource('{commentId}');
-    commentResource.addMethod('DELETE', new apigateway.LambdaIntegration(commentsHandler), authOptions);
-
-    // /users
     const usersResource = api.root.addResource('users');
-    usersResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), authOptions);
+    usersResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), auth);
 
     const teamsResource = api.root.addResource('teams');
-    teamsResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), authOptions);
+    teamsResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), auth);
+    teamsResource.addResource('{teamId}').addResource('members').addMethod('GET', new apigateway.LambdaIntegration(usersHandler), auth);
 
-    const teamMembersResource = teamsResource.addResource('{teamId}').addResource('members');
-    teamMembersResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), authOptions);
-
-    // ── S3 + CloudFront (Frontend) ─────────────────────────────────────
+    // ── S3 + CloudFront ────────────────────────────────────────────────
     const frontendBucket = new s3.Bucket(this, 'FrontendBucket', {
       bucketName: `task-management-frontend-${this.account}-${this.region}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -224,9 +275,10 @@ export class TaskManagementStack extends cdk.Stack {
       },
       additionalBehaviors: {
         '/api/*': {
-          origin: new origins.HttpOrigin(`${api.restApiId}.execute-api.${this.region}.amazonaws.com`, {
-            originPath: '/prod',
-          }),
+          origin: new origins.HttpOrigin(
+            `${api.restApiId}.execute-api.${this.region}.amazonaws.com`,
+            { originPath: '/prod' },
+          ),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
@@ -235,20 +287,11 @@ export class TaskManagementStack extends cdk.Stack {
       },
       defaultRootObject: 'index.html',
       errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-        },
+        { httpStatus: 403, responseHttpStatus: 200, responsePagePath: '/index.html' },
+        { httpStatus: 404, responseHttpStatus: 200, responsePagePath: '/index.html' },
       ],
     });
 
-    // フロントエンドビルド成果物をデプロイ
     new s3deploy.BucketDeployment(this, 'FrontendDeployment', {
       sources: [s3deploy.Source.asset(path.join(__dirname, '../../frontend/dist'))],
       destinationBucket: frontendBucket,
@@ -259,8 +302,22 @@ export class TaskManagementStack extends cdk.Stack {
     // ── Outputs ────────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
+    new cdk.CfnOutput(this, 'CognitoDomain', {
+      value: `https://${userPoolDomain.domainName}.auth.${this.region}.amazoncognito.com`,
+      description: 'Cognito Hosted UI ベース URL',
+    });
     new cdk.CfnOutput(this, 'ApiUrl', { value: api.url });
-    new cdk.CfnOutput(this, 'FrontendUrl', { value: `https://${distribution.distributionDomainName}` });
+    new cdk.CfnOutput(this, 'FrontendUrl', {
+      value: `https://${distribution.distributionDomainName}`,
+      description: 'CloudFront URL — これを Google OAuth コールバック URL に追加してください',
+    });
     new cdk.CfnOutput(this, 'CloudFrontDistributionId', { value: distribution.distributionId });
+    new cdk.CfnOutput(this, 'PostDeployStep', {
+      value: [
+        '1) Cognito User Pool Client のコールバック URL に CloudFront URL を追加',
+        '2) Google Cloud Console の OAuth 承認済みリダイレクト URI に Cognito Hosted UI URL を追加',
+        `   例: https://taskflow-${this.account}.auth.${this.region}.amazoncognito.com/oauth2/idpresponse`,
+      ].join(' | '),
+    });
   }
 }
