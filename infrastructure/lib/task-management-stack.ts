@@ -78,7 +78,7 @@ export class TaskManagementStack extends cdk.Stack {
     const userPoolDomain = userPool.addDomain('UserPoolDomain', {
       cognitoDomain: {
         // アカウント ID を含めてユニークにする
-        domainPrefix: `taskflow-${this.account}`,
+        domainPrefix: `taskmanager-${this.account}`,
       },
     });
 
@@ -316,7 +316,7 @@ export class TaskManagementStack extends cdk.Stack {
       value: [
         '1) Cognito User Pool Client のコールバック URL に CloudFront URL を追加',
         '2) Google Cloud Console の OAuth 承認済みリダイレクト URI に Cognito Hosted UI URL を追加',
-        `   例: https://taskflow-${this.account}.auth.${this.region}.amazoncognito.com/oauth2/idpresponse`,
+        `   例: https://taskmanager-${this.account}.auth.${this.region}.amazoncognito.com/oauth2/idpresponse`,
       ].join(' | '),
     });
   }
