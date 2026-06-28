@@ -70,9 +70,6 @@ export class TaskManagementStack extends cdk.Stack {
       },
     });
 
-    // Cognito が Lambda を呼び出せるよう許可
-    userPool.addTrigger(cognito.UserPoolOperation.PRE_SIGN_UP, domainCheckFn);
-
     // ── Cognito Hosted UI ドメイン ─────────────────────────────────────
     // Cognito のマネージドログインページを使う (Google OAuth コールバック先)
     const userPoolDomain = userPool.addDomain('UserPoolDomain', {
