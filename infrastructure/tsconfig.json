@@ -11,7 +11,8 @@
     "alwaysStrict": true,
     "outDir": "./dist",
     "rootDir": "./lib",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "types": ["node"]
   },
   "exclude": ["node_modules", "dist"]
 }
