@@ -110,7 +110,7 @@ function MainApp() {
       setCurrentUserId(user.userId);
 
       const rawGroups = claims['cognito:groups'];
-      const groups: string[] = Array.isArray(rawGroups) ? rawGroups : rawGroups ? [rawGroups as string] : [];
+      const groups: string[] = Array.isArray(rawGroups) ? (rawGroups as unknown[]).map(String) : rawGroups ? [String(rawGroups)] : [];
       setCurrentUserGroups(groups);
 
       const teamsRes = await usersApi.listTeams();
