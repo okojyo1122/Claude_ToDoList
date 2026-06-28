@@ -7,6 +7,7 @@ import { type Task, tasksApi, usersApi } from './api/tasks';
 import KanbanBoard from './components/KanbanBoard';
 import Sidebar from './components/Sidebar';
 import CreateTaskModal from './components/CreateTaskModal';
+import UserManagementPage from './components/UserManagementPage';
 
 Amplify.configure({
   Auth: {
@@ -28,7 +29,6 @@ Amplify.configure({
 
 interface Team { teamId: string; name: string; description: string; }
 
-// ── ログイン画面 ──────────────────────────────────────────────────────
 function LoginPage() {
   const [loading, setLoading] = useState(false);
 
@@ -52,7 +52,7 @@ function LoginPage() {
         background: '#fff', borderRadius: 16, padding: '48px 40px', width: 380,
         boxShadow: '0 24px 80px rgba(0,0,0,0.2)', textAlign: 'center',
       }}>
-        <h1 style={{ margin: '0 0 8px', fontSize: 28, fontWeight: 800, color: '#4338ca' }}>TaskFlow</h1>
+        <h1 style={{ margin: '0 0 8px', fontSize: 28, fontWeight: 800, color: '#4338ca' }}>TaskManager</h1>
         <p style={{ margin: '0 0 36px', color: '#6b7280', fontSize: 14 }}>技術部タスク管理システム</p>
 
         <button
@@ -62,13 +62,11 @@ function LoginPage() {
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
             width: '100%', padding: '12px 20px', border: '1px solid #d1d5db',
             borderRadius: 8, background: '#fff', cursor: loading ? 'not-allowed' : 'pointer',
-            fontSize: 15, fontWeight: 500, color: '#374151',
-            transition: 'box-shadow 0.15s',
+            fontSize: 15, fontWeight: 500, color: '#374151', transition: 'box-shadow 0.15s',
           }}
           onMouseEnter={e => { if (!loading) e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)'; }}
           onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}
         >
-          {/* Google ロゴ SVG */}
           <svg width="20" height="20" viewBox="0 0 48 48">
             <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
             <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.32-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
@@ -86,18 +84,20 @@ function LoginPage() {
   );
 }
 
-// ── メインアプリ ──────────────────────────────────────────────────────
 function MainApp() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'team' | 'personal'>('team');
+  const [viewMode, setViewMode] = useState<'team' | 'personal' | 'admin'>('personal');
   const [showCreate, setShowCreate] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState('');
   const [currentUserId, setCurrentUserId] = useState('');
+  const [currentUserGroups, setCurrentUserGroups] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterPriority, setFilterPriority] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const isAdmin = currentUserGroups.includes('admin');
 
   useEffect(() => { init(); }, []);
 
@@ -108,14 +108,26 @@ function MainApp() {
       const claims = session.tokens?.idToken?.payload ?? {};
       setCurrentUserEmail(claims.email as string ?? user.username);
       setCurrentUserId(user.userId);
+
+      const rawGroups = claims['cognito:groups'];
+      const groups: string[] = Array.isArray(rawGroups) ? rawGroups : rawGroups ? [rawGroups as string] : [];
+      setCurrentUserGroups(groups);
+
       const teamsRes = await usersApi.listTeams();
       setTeams(teamsRes.data.teams);
+
+      const myTeams = teamsRes.data.teams.filter(t => groups.includes(t.teamId));
+      if (myTeams.length > 0 && !groups.includes('admin')) {
+        setViewMode('team');
+        setSelectedTeam(myTeams[0].teamId);
+      }
     } catch (err) {
       console.error(err);
     }
   }
 
   const loadTasks = useCallback(async () => {
+    if (viewMode === 'admin') return;
     setLoading(true);
     try {
       const params: { teamId?: string; assigneeId?: string } = {};
@@ -143,66 +155,82 @@ function MainApp() {
     return true;
   });
 
-  const headerTitle = viewMode === 'personal' ? 'マイタスク' : selectedTeam ? `# ${selectedTeam}` : '全チームのタスク';
+  const headerTitle = viewMode === 'admin' ? 'ユーザー管理'
+    : viewMode === 'personal' ? 'マイタスク'
+    : selectedTeam ? `# ${selectedTeam}` : '全チームのタスク';
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#f9fafb' }}>
       <Sidebar
         teams={teams} selectedTeam={selectedTeam} viewMode={viewMode}
         onSelectTeam={setSelectedTeam} onViewModeChange={setViewMode}
-        currentUserEmail={currentUserEmail} onSignOut={() => signOut()}
+        currentUserEmail={currentUserEmail} currentUserGroups={currentUserGroups}
+        onSignOut={() => signOut()}
       />
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 style={{ margin: 0, fontSize: 18, color: '#111827', flex: 1 }}>{headerTitle}</h2>
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="タスクを検索..." style={{ padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, width: 200, outline: 'none' }} />
-          <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none' }}>
-            <option value="">全優先度</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <button onClick={() => setShowCreate(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-            + タスク追加
-          </button>
+          {viewMode !== 'admin' && (
+            <>
+              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="タスクを検索..." style={{ padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, width: 200, outline: 'none' }} />
+              <select value={filterPriority} onChange={e => setFilterPriority(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none' }}>
+                <option value="">全優先度</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+              <button onClick={() => setShowCreate(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                + タスク追加
+              </button>
+            </>
+          )}
         </div>
-        <div style={{ padding: '8px 24px', background: '#fff', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 20 }}>
-          {(['todo', 'in_progress', 'review', 'done'] as const).map(s => {
-            const count = filteredTasks.filter(t => t.status === s).length;
-            const labels = { todo: 'Todo', in_progress: 'In Progress', review: 'Review', done: 'Done' };
-            const colors = { todo: '#6b7280', in_progress: '#2563eb', review: '#d97706', done: '#16a34a' };
-            return (
-              <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: colors[s], display: 'inline-block' }} />
-                <span style={{ fontSize: 13, color: '#374151' }}>{labels[s]}: <strong>{count}</strong></span>
-              </div>
-            );
-          })}
-          <span style={{ marginLeft: 'auto', fontSize: 13, color: '#9ca3af' }}>計 {filteredTasks.length} タスク</span>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          {loading
-            ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200, color: '#9ca3af' }}>読み込み中...</div>
-            : <KanbanBoard tasks={filteredTasks} onTasksChange={loadTasks} />
-          }
-        </div>
+
+        {viewMode === 'admin' ? (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <UserManagementPage currentUserId={currentUserId} />
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: '8px 24px', background: '#fff', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: 20 }}>
+              {(['todo', 'in_progress', 'review', 'done'] as const).map(s => {
+                const count = filteredTasks.filter(t => t.status === s).length;
+                const labels = { todo: 'Todo', in_progress: 'In Progress', review: 'Review', done: 'Done' };
+                const colors = { todo: '#6b7280', in_progress: '#2563eb', review: '#d97706', done: '#16a34a' };
+                return (
+                  <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: colors[s], display: 'inline-block' }} />
+                    <span style={{ fontSize: 13, color: '#374151' }}>{labels[s]}: <strong>{count}</strong></span>
+                  </div>
+                );
+              })}
+              <span style={{ marginLeft: 'auto', fontSize: 13, color: '#9ca3af' }}>計 {filteredTasks.length} タスク</span>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              {loading
+                ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200, color: '#9ca3af' }}>読み込み中...</div>
+                : <KanbanBoard tasks={filteredTasks} onTasksChange={loadTasks} />
+              }
+            </div>
+          </>
+        )}
       </main>
       {showCreate && (
-        <CreateTaskModal teams={teams} defaultTeam={selectedTeam ?? undefined}
-          onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); loadTasks(); }} />
+        <CreateTaskModal
+          teams={isAdmin ? teams : teams.filter(t => currentUserGroups.includes(t.teamId))}
+          defaultTeam={selectedTeam ?? undefined}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); loadTasks(); }}
+        />
       )}
     </div>
   );
 }
 
-// ── OAuth コールバック処理 ──────────────────────────────────────────
 function CallbackPage() {
   useEffect(() => {
-    // Amplify が URL の code パラメータを自動処理するのを待ってからルートへ遷移
-    const timer = setTimeout(() => {
-      window.location.replace('/');
-    }, 2000);
+    const timer = setTimeout(() => { window.location.replace('/'); }, 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -213,22 +241,18 @@ function CallbackPage() {
   );
 }
 
-// ── ルートコンポーネント ───────────────────────────────────────────
 export default function App() {
   const [authState, setAuthState] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
   const isCallback = window.location.pathname === '/callback';
 
   useEffect(() => {
-    // Hub でサインイン/サインアウトイベントを監視
     const unsubscribe = Hub.listen('auth', ({ payload }) => {
       if (payload.event === 'signedIn') setAuthState('authenticated');
       if (payload.event === 'signedOut') setAuthState('unauthenticated');
     });
-
     getCurrentUser()
       .then(() => setAuthState('authenticated'))
       .catch(() => setAuthState('unauthenticated'));
-
     return unsubscribe;
   }, []);
 

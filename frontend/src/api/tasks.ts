@@ -55,8 +55,21 @@ export const tasksApi = {
     apiClient.delete(`/tasks/${taskId}/comments/${commentId}`),
 };
 
+export interface UserWithGroups {
+  userId: string;
+  email: string;
+  name: string;
+  username: string;
+  status: string;
+  groups: string[];
+}
+
 export const usersApi = {
   listTeams: () => apiClient.get<{ teams: { teamId: string; name: string; description: string }[] }>('/teams'),
   listMembers: (teamId: string) => apiClient.get<{ users: { userId: string; email: string; name: string }[] }>(`/teams/${teamId}/members`),
-  listAll: () => apiClient.get<{ users: { userId: string; email: string; name: string }[] }>('/users'),
+  listAll: () => apiClient.get<{ users: UserWithGroups[] }>('/users'),
+  updateGroups: (username: string, groups: string[]) =>
+    apiClient.put(`/users/${username}/groups`, { groups }),
+  updateAdmin: (username: string, isAdmin: boolean) =>
+    apiClient.put(`/users/${username}/admin`, { isAdmin }),
 };

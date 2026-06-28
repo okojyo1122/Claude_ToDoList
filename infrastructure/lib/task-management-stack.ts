@@ -209,6 +209,8 @@ export class TaskManagementStack extends cdk.Stack {
         'cognito-idp:ListGroups',
         'cognito-idp:AdminGetUser',
         'cognito-idp:AdminAddUserToGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminListGroupsForUser',
       ],
       resources: [userPool.userPoolArn],
     });
@@ -251,6 +253,9 @@ export class TaskManagementStack extends cdk.Stack {
 
     const usersResource = api.root.addResource('users');
     usersResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), auth);
+    const userResource = usersResource.addResource('{userId}');
+    userResource.addResource('groups').addMethod('PUT', new apigateway.LambdaIntegration(usersHandler), auth);
+    userResource.addResource('admin').addMethod('PUT', new apigateway.LambdaIntegration(usersHandler), auth);
 
     const teamsResource = api.root.addResource('teams');
     teamsResource.addMethod('GET', new apigateway.LambdaIntegration(usersHandler), auth);
