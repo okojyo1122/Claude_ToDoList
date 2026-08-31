@@ -21,36 +21,73 @@
         <select id="sel-group"><option value="">グループ: すべて</option></select>
         <select id="sel-team"><option value="">チーム: すべて</option></select>
         <select id="sel-member"><option value="">人: すべて</option></select>
+        <button id="btn-refresh" class="quick" title="ボードを再読み込み">🔄 更新</button>
       </div>
     </header>
 
-    <div class="quick-actions">
-      <button class="quick" data-prompt="今日のタスクを教えて">🔥 今日のタスク</button>
-      <button class="quick" data-prompt="今週の予定を教えて">📅 今週の予定</button>
-      <button class="quick" data-prompt="期限切れのタスクを教えて">⚠️ 期限切れ</button>
-      <button id="btn-minutes" class="quick">📝 議事録を反映</button>
-      <button id="btn-reset" class="quick ghost">🗑 会話をリセット</button>
-    </div>
-
-    <main id="chat" class="chat">
-      <div class="msg assistant">
-        <div class="bubble">
-          <p>こんにちは!Asana と連携したタスク管理アシスタントです。</p>
-          <ul>
-            <li>「<b>今日のタスク教えて</b>」で今日やることを表示します</li>
-            <li><b>議事録ややったこと</b>を貼り付けると、タスクの追加・完了を Asana に反映します</li>
-            <li>上のセレクタで <b>部 / グループ / チーム / 人</b> の表示範囲を切り替えられます</li>
-          </ul>
+    <div class="layout">
+      <!-- ==== タスクボード ==== -->
+      <section class="board-pane">
+        <div id="board-status" class="board-status">「🔄 更新」を押すと Asana からタスクを読み込みます</div>
+        <div class="board">
+          <div class="column" data-status="overdue">
+            <h2>⚠️ 期限切れ</h2>
+            <div class="cards" id="col-overdue"></div>
+          </div>
+          <div class="column" data-status="today">
+            <h2>🔥 今日やること</h2>
+            <div class="cards" id="col-today"></div>
+          </div>
+          <div class="column" data-status="upcoming">
+            <h2>📅 予定</h2>
+            <div class="cards" id="col-upcoming"></div>
+          </div>
         </div>
-      </div>
-    </main>
+        <details class="done-area">
+          <summary>✅ 完了したタスク (<span id="done-count">0</span>)</summary>
+          <div class="cards done-cards" id="col-done"></div>
+        </details>
+      </section>
 
-    <footer class="composer">
-      <textarea id="input" rows="1"
-        placeholder="メッセージや議事録を入力… (Shift+Enterで改行 / Enterで送信)"></textarea>
-      <button id="send" title="送信">➤</button>
-    </footer>
+      <!-- ==== キャラクター & チャット ==== -->
+      <aside class="side-pane">
+        <div class="character-card">
+          <div class="mascot" id="mascot">
+            <div class="ear left"></div>
+            <div class="ear right"></div>
+            <div class="face">
+              <div class="eye left"></div>
+              <div class="eye right"></div>
+              <div class="blush left"></div>
+              <div class="blush right"></div>
+              <div class="mouth"></div>
+            </div>
+          </div>
+          <div class="character-info">
+            <div class="character-name" id="char-name">…</div>
+            <div class="speech-bubble" id="speech">起動中…</div>
+          </div>
+        </div>
+
+        <div class="quick-actions">
+          <button class="quick" data-prompt="今日のタスクを教えて">🔥 今日のタスク</button>
+          <button class="quick" data-prompt="今週の予定を教えて">📅 今週の予定</button>
+          <button id="btn-minutes" class="quick">📝 議事録を反映</button>
+          <button id="btn-reset" class="quick ghost">🗑 リセット</button>
+        </div>
+
+        <main id="chat" class="chat"></main>
+
+        <footer class="composer">
+          <textarea id="input" rows="1"
+            placeholder="メッセージや議事録を入力… (Shift+Enterで改行)"></textarea>
+          <button id="send" title="送信">➤</button>
+        </footer>
+      </aside>
+    </div>
   </div>
+
+  <div id="mini-mascot" class="mini-mascot" hidden>🎉</div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>

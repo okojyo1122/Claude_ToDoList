@@ -29,6 +29,78 @@ export type ChatEvent =
 
 export type HistoryMessage = Anthropic.Beta.BetaMessageParam;
 
+function requireAsanaToken(): string {
+  const token = process.env.ASANA_MCP_TOKEN;
+  if (!token) {
+    throw new Error(
+      "ASANA_MCP_TOKEN が設定されていません。Asana の OAuth アクセストークンを .env に設定してください。",
+    );
+  }
+  return token;
+}
+
+function baseRequest(asanaToken: string) {
+  return {
+    model: MODEL,
+    max_tokens: 16000 as const,
+    betas: BETAS,
+    fallbacks: "default" as const,
+    system: [
+      {
+        type: "text" as const,
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" as const },
+      },
+    ],
+    mcp_servers: [
+      {
+        type: "url" as const,
+        url: ASANA_MCP_URL,
+        name: "asana",
+        authorization_token: asanaToken,
+      },
+    ],
+    tools: [{ type: "mcp_toolset" as const, mcp_server_name: "asana" }],
+  };
+}
+
+/**
+ * 単発のリクエストを実行し、最終テキストを返す(履歴なし・非ストリーミング用途)。
+ * タスクボードの JSON 取得などに使う。pause_turn は継続する。
+ */
+export async function runOnce(promptText: string): Promise<string> {
+  const asanaToken = requireAsanaToken();
+  const messages: HistoryMessage[] = [{ role: "user", content: promptText }];
+
+  for (let turn = 0; turn < 10; turn++) {
+    const stream = client().beta.messages.stream({
+      ...baseRequest(asanaToken),
+      messages,
+    });
+    const response = await stream.finalMessage();
+    messages.push({ role: "assistant", content: response.content });
+
+    if (response.stop_reason === "refusal") {
+      throw new Error("リクエストが安全上の理由で拒否されました。");
+    }
+    if (response.stop_reason !== "pause_turn") {
+      break;
+    }
+  }
+
+  const last = messages[messages.length - 1];
+  if (last.role !== "assistant" || typeof last.content === "string") {
+    return typeof last.content === "string" ? last.content : "";
+  }
+  return last.content
+    .filter(
+      (b): b is Anthropic.Beta.BetaTextBlock =>
+        typeof b === "object" && "type" in b && b.type === "text",
+    )
+    .map((b) => b.text)
+    .join("");
+}
+
 /**
  * 会話履歴 + 新規ユーザーメッセージで Claude を呼び出す。
  * Asana MCP サーバへの接続は Anthropic 側(MCP コネクタ)で行われるため、
@@ -41,39 +113,14 @@ export async function runChat(
   history: HistoryMessage[],
   onEvent: (ev: ChatEvent) => void,
 ): Promise<HistoryMessage[]> {
-  const asanaToken = process.env.ASANA_MCP_TOKEN;
-  if (!asanaToken) {
-    throw new Error(
-      "ASANA_MCP_TOKEN が設定されていません。Asana の OAuth アクセストークンを .env に設定してください。",
-    );
-  }
-
+  const asanaToken = requireAsanaToken();
   const messages: HistoryMessage[] = [...history];
   const appended: HistoryMessage[] = [];
 
   // pause_turn(長いツール実行フロー)対応: 最大10回まで継続する
   for (let turn = 0; turn < 10; turn++) {
     const stream = client().beta.messages.stream({
-      model: MODEL,
-      max_tokens: 16000,
-      betas: BETAS,
-      fallbacks: "default",
-      system: [
-        {
-          type: "text",
-          text: systemPrompt,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      mcp_servers: [
-        {
-          type: "url",
-          url: ASANA_MCP_URL,
-          name: "asana",
-          authorization_token: asanaToken,
-        },
-      ],
-      tools: [{ type: "mcp_toolset", mcp_server_name: "asana" }],
+      ...baseRequest(asanaToken),
       messages,
     });
 

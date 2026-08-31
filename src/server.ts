@@ -2,8 +2,14 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runChat, type ChatEvent, type HistoryMessage } from "./claude.js";
+import {
+  runChat,
+  runOnce,
+  type ChatEvent,
+  type HistoryMessage,
+} from "./claude.js";
 import { loadOrg } from "./org.js";
+import { loadCharacter } from "./character.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(here, "../public");
@@ -43,6 +49,63 @@ function todayInTokyo(): string {
 
 app.get("/api/org", (_req, res) => {
   res.json(loadOrg());
+});
+
+app.get("/api/character", (_req, res) => {
+  res.json(loadCharacter());
+});
+
+/** Claude の出力テキストから JSON オブジェクトを取り出す */
+function extractJson(text: string): unknown {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) {
+    throw new Error("応答から JSON を取得できませんでした");
+  }
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+// タスクボード用の構造化データを取得する
+app.post("/api/board", async (req, res) => {
+  const { scope } = req.body as { scope?: Scope };
+  const prompt = [
+    `BOARD_JSON`,
+    `[コンテキスト] 今日: ${todayInTokyo()} / 表示スコープ: ${scopeLabel(scope)}`,
+  ].join("\n");
+
+  try {
+    const text = await runOnce(prompt);
+    res.json(extractJson(text));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("board error:", err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+// ボードのチェックボックスからタスクを完了にする
+app.post("/api/complete", async (req, res) => {
+  const { gid, name } = req.body as { gid?: string; name?: string };
+  if (!gid || !name) {
+    res.status(400).json({ error: "gid と name は必須です" });
+    return;
+  }
+  const prompt = [
+    `[コンテキスト] 今日: ${todayInTokyo()}`,
+    "---",
+    `Asana のタスク「${name}」(gid: ${gid}) を完了にしてください。`,
+    "完了できたら、キャラクターとして褒めの一言だけを返してください(30〜60文字、Markdown不要)。",
+    "失敗した場合は理由を短く伝えてください。",
+  ].join("\n");
+
+  try {
+    const comment = (await runOnce(prompt)).trim();
+    res.json({ ok: true, comment });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("complete error:", err);
+    res.status(500).json({ error: msg });
+  }
 });
 
 app.post("/api/chat", async (req, res) => {

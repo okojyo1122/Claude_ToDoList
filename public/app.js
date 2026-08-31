@@ -4,6 +4,11 @@ const chatEl = document.getElementById("chat");
 const inputEl = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const todayEl = document.getElementById("today");
+const mascotEl = document.getElementById("mascot");
+const speechEl = document.getElementById("speech");
+const charNameEl = document.getElementById("char-name");
+const boardStatusEl = document.getElementById("board-status");
+const miniMascotEl = document.getElementById("mini-mascot");
 
 const sessionId =
   sessionStorage.getItem("sessionId") ??
@@ -13,6 +18,56 @@ sessionStorage.setItem("sessionId", sessionId);
 todayEl.textContent = new Intl.DateTimeFormat("ja-JP", {
   year: "numeric", month: "long", day: "numeric", weekday: "long",
 }).format(new Date());
+
+// ---- キャラクター ----
+let character = { name: "アシスタント", emoji: "🦊", persona: "" };
+
+function say(text, mood) {
+  speechEl.textContent = text;
+  mascotEl.classList.remove("happy", "annoyed", "excited");
+  if (mood) mascotEl.classList.add(mood);
+}
+
+function celebrate() {
+  mascotEl.classList.add("excited");
+  setTimeout(() => mascotEl.classList.remove("excited"), 1600);
+  miniMascotEl.textContent = character.emoji;
+  miniMascotEl.hidden = false;
+  miniMascotEl.classList.remove("run");
+  void miniMascotEl.offsetWidth; // アニメーション再トリガー
+  miniMascotEl.classList.add("run");
+}
+
+function addWelcome() {
+  const msg = document.createElement("div");
+  msg.className = "msg assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  renderMarkdown(
+    bubble,
+    [
+      `こんにちは!**${character.name}** です。`,
+      "- 「**今日のタスク教えて**」で今日やることを表示",
+      "- **議事録ややったこと**を貼ると Asana に自動反映",
+      "- 上のセレクタで **部 / グループ / チーム / 人** を切替",
+    ].join("\n"),
+  );
+  msg.appendChild(bubble);
+  chatEl.appendChild(msg);
+}
+
+fetch("/api/character")
+  .then((r) => r.json())
+  .then((c) => {
+    character = c;
+    charNameEl.textContent = `${c.emoji} ${c.name}`;
+    say("やっと来たか。「🔄 更新」でタスク読み込むぞ。");
+    addWelcome();
+  })
+  .catch(() => {
+    charNameEl.textContent = "アシスタント";
+    say("キャラクター設定の読み込みに失敗した…");
+  });
 
 // ---- 組織スコープセレクタ ----
 let org = { departments: [] };
@@ -81,10 +136,154 @@ function getScope() {
   };
 }
 
+// ---- タスクボード ----
+const columns = {
+  overdue: document.getElementById("col-overdue"),
+  today: document.getElementById("col-today"),
+  upcoming: document.getElementById("col-upcoming"),
+  done: document.getElementById("col-done"),
+};
+const doneCountEl = document.getElementById("done-count");
+let boardLoading = false;
+
+function fmtDue(due) {
+  if (!due) return null;
+  const [y, m, d] = due.split("-").map(Number);
+  return `${m}/${d}`;
+}
+
+function makeCard(task) {
+  const card = document.createElement("div");
+  card.className = "card" + (task.status === "done" ? " done" : "");
+
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.checked = task.status === "done";
+  check.disabled = task.status === "done";
+  check.addEventListener("change", () => completeTask(task, card, check));
+
+  const body = document.createElement("div");
+  body.className = "card-body";
+  const name = document.createElement("div");
+  name.className = "card-name";
+  name.textContent = task.name;
+  const meta = document.createElement("div");
+  meta.className = "card-meta";
+  if (task.assignee) {
+    const s = document.createElement("span");
+    s.textContent = `👤 ${task.assignee}`;
+    meta.appendChild(s);
+  }
+  const due = fmtDue(task.due_on);
+  if (due) {
+    const s = document.createElement("span");
+    s.textContent = `⏰ ${due}`;
+    if (task.status === "overdue") s.className = "overdue";
+    meta.appendChild(s);
+  }
+  if (task.project) {
+    const s = document.createElement("span");
+    s.textContent = `📁 ${task.project}`;
+    meta.appendChild(s);
+  }
+  body.appendChild(name);
+  body.appendChild(meta);
+  card.appendChild(check);
+  card.appendChild(body);
+  return card;
+}
+
+function renderBoard(tasks) {
+  for (const col of Object.values(columns)) col.innerHTML = "";
+  let doneCount = 0;
+  for (const task of tasks) {
+    const col = columns[task.status] ?? columns.upcoming;
+    if (task.status === "done") doneCount++;
+    col.appendChild(makeCard(task));
+  }
+  doneCountEl.textContent = String(doneCount);
+  for (const [status, col] of Object.entries(columns)) {
+    if (status !== "done" && col.children.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "card-meta";
+      empty.style.padding = "4px";
+      empty.textContent = "なし 🎉";
+      col.appendChild(empty);
+    }
+  }
+}
+
+async function loadBoard() {
+  if (boardLoading) return;
+  boardLoading = true;
+  boardStatusEl.textContent = "Asana からタスクを読み込み中…(数十秒かかることがあります)";
+  boardStatusEl.classList.add("loading");
+  say("ちょっと待ってろ、Asana 見てくる。");
+
+  try {
+    const res = await fetch("/api/board", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: getScope() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `サーバエラー (${res.status})`);
+
+    renderBoard(Array.isArray(data.tasks) ? data.tasks : []);
+    const overdue = (data.tasks || []).filter((t) => t.status === "overdue").length;
+    say(
+      data.comment ||
+        (overdue > 0 ? `期限切れ ${overdue} 件あるぞ…` : "今日も頑張ろうぜ。"),
+      overdue > 0 ? "annoyed" : "happy",
+    );
+    boardStatusEl.textContent = `最終更新: ${new Date().toLocaleTimeString("ja-JP")}`;
+  } catch (err) {
+    boardStatusEl.textContent = `読み込み失敗: ${err.message}`;
+    say("Asana に繋がらなかった…設定を確認してくれ。", "annoyed");
+  } finally {
+    boardStatusEl.classList.remove("loading");
+    boardLoading = false;
+  }
+}
+
+async function completeTask(task, card, check) {
+  check.disabled = true;
+  card.classList.add("completing");
+  say(`「${task.name}」完了な。Asana に反映中…`);
+
+  try {
+    const res = await fetch("/api/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gid: task.gid, name: task.name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `サーバエラー (${res.status})`);
+
+    card.classList.remove("completing");
+    card.classList.add("done");
+    columns.done.appendChild(card);
+    doneCountEl.textContent = String(Number(doneCountEl.textContent) + 1);
+    say(data.comment || "よくやった!えらいぞ。", "happy");
+    celebrate();
+  } catch (err) {
+    check.checked = false;
+    check.disabled = false;
+    card.classList.remove("completing");
+    say(`反映に失敗した… (${err.message})`, "annoyed");
+  }
+}
+
+document.getElementById("btn-refresh").addEventListener("click", loadBoard);
+
 // ---- チャット描画 ----
 function renderMarkdown(el, text) {
-  const html = DOMPurify.sanitize(marked.parse(text));
-  el.innerHTML = html;
+  if (window.marked && window.DOMPurify) {
+    el.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  } else {
+    // CDN が使えない環境ではプレーンテキストで表示する
+    el.textContent = text;
+  }
 }
 
 function addUserMessage(text) {
@@ -114,7 +313,7 @@ function scrollBottom() {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-// ---- 送信 ----
+// ---- チャット送信 ----
 let busy = false;
 
 async function send(message) {
@@ -207,7 +406,7 @@ inputEl.addEventListener("keydown", (e) => {
 
 function autoGrow() {
   inputEl.style.height = "auto";
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 240) + "px";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
 }
 inputEl.addEventListener("input", autoGrow);
 
@@ -224,6 +423,10 @@ document.getElementById("btn-minutes").addEventListener("click", () => {
   inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 });
 
+// デバッグ・動作確認用に公開
+window.renderBoard = renderBoard;
+window.say = say;
+
 document.getElementById("btn-reset").addEventListener("click", async () => {
   await fetch("/api/reset", {
     method: "POST",
@@ -231,11 +434,5 @@ document.getElementById("btn-reset").addEventListener("click", async () => {
     body: JSON.stringify({ sessionId }),
   });
   chatEl.innerHTML = "";
-  const msg = document.createElement("div");
-  msg.className = "msg assistant";
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = "会話をリセットしました。";
-  msg.appendChild(bubble);
-  chatEl.appendChild(msg);
+  say("会話リセットな。心機一転いくぞ。");
 });
