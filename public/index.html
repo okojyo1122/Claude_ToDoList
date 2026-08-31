@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>チームタスク管理</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">📋</span>
+        <div>
+          <h1>チームタスク管理</h1>
+          <p id="today" class="subtitle"></p>
+        </div>
+      </div>
+      <div class="scope">
+        <select id="sel-dept"><option value="">部: すべて</option></select>
+        <select id="sel-group"><option value="">グループ: すべて</option></select>
+        <select id="sel-team"><option value="">チーム: すべて</option></select>
+        <select id="sel-member"><option value="">人: すべて</option></select>
+      </div>
+    </header>
+
+    <div class="quick-actions">
+      <button class="quick" data-prompt="今日のタスクを教えて">🔥 今日のタスク</button>
+      <button class="quick" data-prompt="今週の予定を教えて">📅 今週の予定</button>
+      <button class="quick" data-prompt="期限切れのタスクを教えて">⚠️ 期限切れ</button>
+      <button id="btn-minutes" class="quick">📝 議事録を反映</button>
+      <button id="btn-reset" class="quick ghost">🗑 会話をリセット</button>
+    </div>
+
+    <main id="chat" class="chat">
+      <div class="msg assistant">
+        <div class="bubble">
+          <p>こんにちは!Asana と連携したタスク管理アシスタントです。</p>
+          <ul>
+            <li>「<b>今日のタスク教えて</b>」で今日やることを表示します</li>
+            <li><b>議事録ややったこと</b>を貼り付けると、タスクの追加・完了を Asana に反映します</li>
+            <li>上のセレクタで <b>部 / グループ / チーム / 人</b> の表示範囲を切り替えられます</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <textarea id="input" rows="1"
+        placeholder="メッセージや議事録を入力… (Shift+Enterで改行 / Enterで送信)"></textarea>
+      <button id="send" title="送信">➤</button>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

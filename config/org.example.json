@@ -1,0 +1,43 @@
+{
+  "departments": [
+    {
+      "name": "開発部",
+      "groups": [
+        {
+          "name": "プロダクトグループ",
+          "teams": [
+            {
+              "name": "アプリチーム",
+              "members": [
+                { "name": "山田太郎", "asanaEmail": "taro.yamada@example.com", "role": "リーダー" },
+                { "name": "佐藤花子", "asanaEmail": "hanako.sato@example.com" }
+              ]
+            },
+            {
+              "name": "インフラチーム",
+              "members": [
+                { "name": "鈴木一郎", "asanaEmail": "ichiro.suzuki@example.com" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "営業部",
+      "groups": [
+        {
+          "name": "第一営業グループ",
+          "teams": [
+            {
+              "name": "東日本チーム",
+              "members": [
+                { "name": "田中次郎", "asanaEmail": "jiro.tanaka@example.com" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
