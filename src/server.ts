@@ -9,7 +9,7 @@ import {
   type HistoryMessage,
 } from "./claude.js";
 import { loadOrg } from "./org.js";
-import { loadCharacter } from "./character.js";
+import { findPersona, loadPersonas } from "./personas.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(here, "../public");
@@ -51,9 +51,14 @@ app.get("/api/org", (_req, res) => {
   res.json(loadOrg());
 });
 
-app.get("/api/character", (_req, res) => {
-  res.json(loadCharacter());
+app.get("/api/personas", (_req, res) => {
+  res.json(loadPersonas());
 });
+
+function personaContext(personaId: string | undefined): string {
+  const p = findPersona(personaId);
+  return `口調モード: ${p.id}(${p.label})`;
+}
 
 /** Claude の出力テキストから JSON オブジェクトを取り出す */
 function extractJson(text: string): unknown {
@@ -67,10 +72,10 @@ function extractJson(text: string): unknown {
 
 // タスクボード用の構造化データを取得する
 app.post("/api/board", async (req, res) => {
-  const { scope } = req.body as { scope?: Scope };
+  const { scope, personaId } = req.body as { scope?: Scope; personaId?: string };
   const prompt = [
     `BOARD_JSON`,
-    `[コンテキスト] 今日: ${todayInTokyo()} / 表示スコープ: ${scopeLabel(scope)}`,
+    `[コンテキスト] 今日: ${todayInTokyo()} / 表示スコープ: ${scopeLabel(scope)} / ${personaContext(personaId)}`,
   ].join("\n");
 
   try {
@@ -85,16 +90,20 @@ app.post("/api/board", async (req, res) => {
 
 // ボードのチェックボックスからタスクを完了にする
 app.post("/api/complete", async (req, res) => {
-  const { gid, name } = req.body as { gid?: string; name?: string };
+  const { gid, name, personaId } = req.body as {
+    gid?: string;
+    name?: string;
+    personaId?: string;
+  };
   if (!gid || !name) {
     res.status(400).json({ error: "gid と name は必須です" });
     return;
   }
   const prompt = [
-    `[コンテキスト] 今日: ${todayInTokyo()}`,
+    `[コンテキスト] 今日: ${todayInTokyo()} / ${personaContext(personaId)}`,
     "---",
     `Asana のタスク「${name}」(gid: ${gid}) を完了にしてください。`,
-    "完了できたら、キャラクターとして褒めの一言だけを返してください(30〜60文字、Markdown不要)。",
+    "完了できたら、口調モードに合った労い・褒めの一言だけを返してください(30〜60文字、Markdown不要)。",
     "失敗した場合は理由を短く伝えてください。",
   ].join("\n");
 
@@ -109,10 +118,11 @@ app.post("/api/complete", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { sessionId, message, scope } = req.body as {
+  const { sessionId, message, scope, personaId } = req.body as {
     sessionId?: string;
     message?: string;
     scope?: Scope;
+    personaId?: string;
   };
   if (!sessionId || !message?.trim()) {
     res.status(400).json({ error: "sessionId と message は必須です" });
@@ -128,7 +138,7 @@ app.post("/api/chat", async (req, res) => {
 
   const history = sessions.get(sessionId) ?? [];
   const contextualMessage = [
-    `[コンテキスト] 今日: ${todayInTokyo()} / 表示スコープ: ${scopeLabel(scope)}`,
+    `[コンテキスト] 今日: ${todayInTokyo()} / 表示スコープ: ${scopeLabel(scope)} / ${personaContext(personaId)}`,
     "---",
     message,
   ].join("\n");

@@ -6,7 +6,6 @@ const sendBtn = document.getElementById("send");
 const todayEl = document.getElementById("today");
 const mascotEl = document.getElementById("mascot");
 const speechEl = document.getElementById("speech");
-const charNameEl = document.getElementById("char-name");
 const boardStatusEl = document.getElementById("board-status");
 const miniMascotEl = document.getElementById("mini-mascot");
 
@@ -19,8 +18,16 @@ todayEl.textContent = new Intl.DateTimeFormat("ja-JP", {
   year: "numeric", month: "long", day: "numeric", weekday: "long",
 }).format(new Date());
 
-// ---- キャラクター ----
-let character = { name: "アシスタント", emoji: "🦊", persona: "" };
+// ---- キャラクター(Claude)と口調モード ----
+let personas = [];
+const personaSel = document.getElementById("sel-persona");
+
+function currentPersona() {
+  return (
+    personas.find((p) => p.id === personaSel.value) ??
+    personas[0] ?? { id: "biz", label: "ビジネス", emoji: "✨", greeting: "" }
+  );
+}
 
 function say(text, mood) {
   speechEl.textContent = text;
@@ -31,7 +38,7 @@ function say(text, mood) {
 function celebrate() {
   mascotEl.classList.add("excited");
   setTimeout(() => mascotEl.classList.remove("excited"), 1600);
-  miniMascotEl.textContent = character.emoji;
+  miniMascotEl.textContent = currentPersona().emoji || "🎉";
   miniMascotEl.hidden = false;
   miniMascotEl.classList.remove("run");
   void miniMascotEl.offsetWidth; // アニメーション再トリガー
@@ -46,28 +53,45 @@ function addWelcome() {
   renderMarkdown(
     bubble,
     [
-      `こんにちは!**${character.name}** です。`,
+      "こんにちは!タスク管理アシスタントの **Claude** です。",
       "- 「**今日のタスク教えて**」で今日やることを表示",
       "- **議事録ややったこと**を貼ると Asana に自動反映",
       "- 上のセレクタで **部 / グループ / チーム / 人** を切替",
+      "- キャラクター横のセレクタで**口調**を変更できます",
     ].join("\n"),
   );
   msg.appendChild(bubble);
   chatEl.appendChild(msg);
 }
 
-fetch("/api/character")
+fetch("/api/personas")
   .then((r) => r.json())
-  .then((c) => {
-    character = c;
-    charNameEl.textContent = `${c.emoji} ${c.name}`;
-    say("やっと来たか。「🔄 更新」でタスク読み込むぞ。");
+  .then((list) => {
+    personas = list;
+    personaSel.innerHTML = "";
+    for (const p of personas) {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = `${p.emoji} ${p.label}`;
+      personaSel.appendChild(o);
+    }
+    let saved = null;
+    try { saved = localStorage.getItem("personaId"); } catch {}
+    if (saved && personas.some((p) => p.id === saved)) {
+      personaSel.value = saved;
+    }
+    say(currentPersona().greeting || "「🔄 更新」でタスクを読み込みます。");
     addWelcome();
   })
   .catch(() => {
-    charNameEl.textContent = "アシスタント";
-    say("キャラクター設定の読み込みに失敗した…");
+    say("口調設定の読み込みに失敗しました。");
+    addWelcome();
   });
+
+personaSel.addEventListener("change", () => {
+  try { localStorage.setItem("personaId", personaSel.value); } catch {}
+  say(currentPersona().greeting || "口調を切り替えました。");
+});
 
 // ---- 組織スコープセレクタ ----
 let org = { departments: [] };
@@ -218,13 +242,13 @@ async function loadBoard() {
   boardLoading = true;
   boardStatusEl.textContent = "Asana からタスクを読み込み中…(数十秒かかることがあります)";
   boardStatusEl.classList.add("loading");
-  say("ちょっと待ってろ、Asana 見てくる。");
+  say("Asana からタスクを読み込んでいます…");
 
   try {
     const res = await fetch("/api/board", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope: getScope() }),
+      body: JSON.stringify({ scope: getScope(), personaId: personaSel.value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `サーバエラー (${res.status})`);
@@ -233,13 +257,15 @@ async function loadBoard() {
     const overdue = (data.tasks || []).filter((t) => t.status === "overdue").length;
     say(
       data.comment ||
-        (overdue > 0 ? `期限切れ ${overdue} 件あるぞ…` : "今日も頑張ろうぜ。"),
+        (overdue > 0
+          ? `期限切れが ${overdue} 件あります。`
+          : "今日も一日がんばりましょう。"),
       overdue > 0 ? "annoyed" : "happy",
     );
     boardStatusEl.textContent = `最終更新: ${new Date().toLocaleTimeString("ja-JP")}`;
   } catch (err) {
     boardStatusEl.textContent = `読み込み失敗: ${err.message}`;
-    say("Asana に繋がらなかった…設定を確認してくれ。", "annoyed");
+    say("Asana に接続できませんでした。設定をご確認ください。", "annoyed");
   } finally {
     boardStatusEl.classList.remove("loading");
     boardLoading = false;
@@ -249,13 +275,17 @@ async function loadBoard() {
 async function completeTask(task, card, check) {
   check.disabled = true;
   card.classList.add("completing");
-  say(`「${task.name}」完了な。Asana に反映中…`);
+  say(`「${task.name}」を完了として Asana に反映中…`);
 
   try {
     const res = await fetch("/api/complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ gid: task.gid, name: task.name }),
+      body: JSON.stringify({
+        gid: task.gid,
+        name: task.name,
+        personaId: personaSel.value,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `サーバエラー (${res.status})`);
@@ -264,13 +294,13 @@ async function completeTask(task, card, check) {
     card.classList.add("done");
     columns.done.appendChild(card);
     doneCountEl.textContent = String(Number(doneCountEl.textContent) + 1);
-    say(data.comment || "よくやった!えらいぞ。", "happy");
+    say(data.comment || "完了しました。お疲れさまでした!", "happy");
     celebrate();
   } catch (err) {
     check.checked = false;
     check.disabled = false;
     card.classList.remove("completing");
-    say(`反映に失敗した… (${err.message})`, "annoyed");
+    say(`反映に失敗しました… (${err.message})`, "annoyed");
   }
 }
 
@@ -343,7 +373,12 @@ async function send(message) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, message, scope: getScope() }),
+      body: JSON.stringify({
+        sessionId,
+        message,
+        scope: getScope(),
+        personaId: personaSel.value,
+      }),
     });
     if (!res.ok || !res.body) {
       const err = await res.json().catch(() => ({}));
@@ -434,5 +469,5 @@ document.getElementById("btn-reset").addEventListener("click", async () => {
     body: JSON.stringify({ sessionId }),
   });
   chatEl.innerHTML = "";
-  say("会話リセットな。心機一転いくぞ。");
+  say("会話をリセットしました。");
 });

@@ -11,7 +11,7 @@
   --accent-2: #6ee7b7;
   --danger: #ff7b7b;
   --warn: #ffc46b;
-  --mascot: #f4a259;
+  --mascot: #d97757;
 }
 
 html, body { height: 100%; }
@@ -175,63 +175,69 @@ h1 { font-size: 18px; font-weight: 700; }
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
 }
-.mascot .ear {
+/* Claude ロゴ風サンバースト */
+.mascot .rays {
   position: absolute;
-  top: -6px;
-  width: 0; height: 0;
-  border-left: 12px solid transparent;
-  border-right: 12px solid transparent;
-  border-bottom: 22px solid var(--mascot);
+  inset: 0;
+  animation: spin 24s linear infinite;
 }
-.mascot .ear.left { left: 6px; transform: rotate(-18deg); }
-.mascot .ear.right { right: 6px; transform: rotate(18deg); }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.mascot .rays i {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 9px;
+  height: 100%;
+  margin-left: -4.5px;
+  background: var(--mascot);
+  border-radius: 5px;
+}
+.mascot .rays i:nth-child(1) { transform: rotate(0deg); }
+.mascot .rays i:nth-child(2) { transform: rotate(30deg); }
+.mascot .rays i:nth-child(3) { transform: rotate(60deg); }
+.mascot .rays i:nth-child(4) { transform: rotate(90deg); }
+.mascot .rays i:nth-child(5) { transform: rotate(120deg); }
+.mascot .rays i:nth-child(6) { transform: rotate(150deg); }
 .mascot .face {
   position: absolute;
-  inset: 6px 0 0 0;
-  background: linear-gradient(160deg, var(--mascot), #e07b39);
-  border-radius: 50% 50% 46% 46%;
+  inset: 14px;
+  background: radial-gradient(circle at 35% 30%, #e89070, var(--mascot));
+  border-radius: 50%;
 }
 .mascot .eye {
   position: absolute;
-  top: 30px;
-  width: 9px; height: 11px;
-  background: #26160c;
+  top: 17px;
+  width: 7px; height: 9px;
+  background: #3a1d10;
   border-radius: 50%;
   animation: blink 4.5s infinite;
 }
-.mascot .eye.left { left: 20px; }
-.mascot .eye.right { right: 20px; }
+.mascot .eye.left { left: 13px; }
+.mascot .eye.right { right: 13px; }
 @keyframes blink {
   0%, 94%, 100% { transform: scaleY(1); }
   96%, 98% { transform: scaleY(0.1); }
 }
-.mascot .blush {
-  position: absolute;
-  top: 42px;
-  width: 12px; height: 6px;
-  background: rgba(255, 120, 120, 0.55);
-  border-radius: 50%;
-}
-.mascot .blush.left { left: 10px; }
-.mascot .blush.right { right: 10px; }
 .mascot .mouth {
   position: absolute;
-  top: 47px;
+  top: 28px;
   left: 50%;
   transform: translateX(-50%);
-  width: 16px; height: 8px;
-  border: 2px solid #26160c;
+  width: 14px; height: 7px;
+  border: 2px solid #3a1d10;
   border-top: none;
-  border-radius: 0 0 14px 14px;
+  border-radius: 0 0 12px 12px;
 }
 /* 表情: happy = 大きい口 / annoyed = への字 */
-.mascot.happy .mouth { height: 11px; width: 20px; background: #7a3b12; }
+.mascot.happy .mouth { height: 10px; width: 18px; background: #6e3117; }
 .mascot.annoyed .mouth {
   border: none;
-  border-top: 2px solid #26160c;
-  height: 0; width: 14px;
+  border-top: 2px solid #3a1d10;
+  height: 0; width: 12px;
   border-radius: 0;
-  top: 51px;
+  top: 32px;
 }
 .mascot.excited { animation: hop 0.5s ease-in-out 3; }
 @keyframes hop {
@@ -240,7 +246,21 @@ h1 { font-size: 18px; font-weight: 700; }
 }
 
 .character-info { min-width: 0; flex: 1; }
-.character-name { font-size: 13px; font-weight: 700; color: var(--accent-2); margin-bottom: 6px; }
+.character-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.character-name { font-size: 13px; font-weight: 700; color: var(--accent-2); }
+#sel-persona {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
 .speech-bubble {
   position: relative;
   background: var(--panel-2);

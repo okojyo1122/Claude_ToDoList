@@ -2,4 +2,5 @@ node_modules/
 dist/
 .env
 config/org.json
+config/personas.json
 *.log
