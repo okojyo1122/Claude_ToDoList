@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "auth": "tsx src/auth.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },

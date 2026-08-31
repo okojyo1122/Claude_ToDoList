@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "./prompts.js";
+import { ASANA_MCP_URL, getAsanaToken } from "./asanaAuth.js";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-opus-5";
-const ASANA_MCP_URL = process.env.ASANA_MCP_URL ?? "https://mcp.asana.com/sse";
 
 const BETAS = ["mcp-client-2025-11-20", "server-side-fallback-2026-07-01"];
 
@@ -28,16 +28,6 @@ export type ChatEvent =
   | { type: "done" };
 
 export type HistoryMessage = Anthropic.Beta.BetaMessageParam;
-
-function requireAsanaToken(): string {
-  const token = process.env.ASANA_MCP_TOKEN;
-  if (!token) {
-    throw new Error(
-      "ASANA_MCP_TOKEN が設定されていません。Asana の OAuth アクセストークンを .env に設定してください。",
-    );
-  }
-  return token;
-}
 
 function baseRequest(asanaToken: string) {
   return {
@@ -69,7 +59,7 @@ function baseRequest(asanaToken: string) {
  * タスクボードの JSON 取得などに使う。pause_turn は継続する。
  */
 export async function runOnce(promptText: string): Promise<string> {
-  const asanaToken = requireAsanaToken();
+  const asanaToken = await getAsanaToken();
   const messages: HistoryMessage[] = [{ role: "user", content: promptText }];
 
   for (let turn = 0; turn < 10; turn++) {
@@ -113,7 +103,7 @@ export async function runChat(
   history: HistoryMessage[],
   onEvent: (ev: ChatEvent) => void,
 ): Promise<HistoryMessage[]> {
-  const asanaToken = requireAsanaToken();
+  const asanaToken = await getAsanaToken();
   const messages: HistoryMessage[] = [...history];
   const appended: HistoryMessage[] = [];
 

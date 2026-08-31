@@ -3,4 +3,5 @@ dist/
 .env
 config/org.json
 config/personas.json
+config/.asana-token.json
 *.log

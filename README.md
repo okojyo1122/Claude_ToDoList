@@ -25,35 +25,33 @@ Asana への接続は Anthropic の **MCP コネクタ**(`mcp-client` ベータ)
 
 ## セットアップ
 
+> 📘 **初めて動かす場合は [SETUP.md](./SETUP.md) の手順書を参照してください**(Asana 無償版での利用可否・お試しシナリオ・トラブルシューティング付き)。以下は概要です。
+
 ### 1. 依存関係のインストール
 
 ```bash
 npm install
+cp .env.example .env
 ```
 
 ### 2. 環境変数の設定
-
-```bash
-cp .env.example .env
-```
 
 `.env` に以下を設定します:
 
 | 変数 | 説明 |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API キー ([console.anthropic.com](https://console.anthropic.com/) で取得) |
-| `ASANA_MCP_TOKEN` | Asana MCP サーバ用の OAuth アクセストークン(下記参照) |
+| `ASANA_CLIENT_ID` / `ASANA_CLIENT_SECRET` | [Asana 開発者コンソール](https://app.asana.com/0/developer-console) で作成した **MCP アプリ**のクライアント情報。リダイレクト URL に `http://localhost:8787/oauth/callback` を登録すること |
 
-### Asana MCP トークンの取得
+### 3. Asana と連携(OAuth)
 
-Asana の公式 MCP サーバ (`https://mcp.asana.com/sse`) は OAuth 認証を使用します。
+```bash
+npm run auth
+```
 
-1. [Asana 開発者コンソール](https://app.asana.com/0/developer-console) で OAuth アプリを作成
-2. OAuth フローを通してアクセストークンを取得し、`ASANA_MCP_TOKEN` に設定
+表示された URL をブラウザで開き、ワークスペースを選んで許可します。トークンは `config/.asana-token.json` に保存され、期限切れは自動でリフレッシュされます。
 
-トークンが期限切れになると Asana ツールの呼び出しが失敗するので、その場合はトークンを更新してください。詳細は [Asana MCP ドキュメント](https://developers.asana.com/docs/using-asanas-mcp-server) を参照。
-
-### 3. 組織構成の設定
+### 4. 組織構成の設定
 
 ```bash
 cp config/org.example.json config/org.json
@@ -79,7 +77,7 @@ cp config/org.example.json config/org.json
 
 `description` が Claude への口調指示になります。
 
-### 4. 起動
+### 5. 起動
 
 ```bash
 npm run dev        # 開発 (ホットリロード)
